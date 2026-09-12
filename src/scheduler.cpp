@@ -1,32 +1,29 @@
-#include "acrtos/scheduler.hpp"
-#include "acrtos/port.hpp"
+#include "scheduler.hpp"
+#include "port.hpp"
 
 extern "C" {
     uint32_t* current_sp = nullptr;
 
     void schedule_next_task() {
         auto& sched = acrtos::Scheduler::instance();
-        if (sched.get_task_count() == 0) return;
+        auto& ready_mgr = sched.get_ready_manager();
+        auto* prev_task = sched.get_current_task();
 
-        sched.get_task(sched.get_current_index()).sp = current_sp;
-
-        uint8_t next_task = sched.get_current_index();
-        bool found = false;
-
-        for (size_t i = 0; i < sched.get_task_count(); ++i) {
-            next_task = (next_task + 1) % sched.get_task_count();
-            if (next_task != 0 && sched.get_task(next_task).state == acrtos::TaskState::Ready) {
-                sched.set_current_index(next_task);
-                found = true;
-                break;
+        if (prev_task != nullptr) {
+            prev_task->sp = current_sp;
+            if (prev_task->state == acrtos::TaskState::Running) {
+                prev_task->state = acrtos::TaskState::Ready;
             }
         }
 
-        if (!found) {
-            sched.set_current_index(0);
-        }
+        auto* next_task = ready_mgr.get_highest_priority_task();
 
-        current_sp = sched.get_task(sched.get_current_index()).sp;
+        if (next_task != nullptr) {
+            next_task->state = acrtos::TaskState::Running;
+            sched.set_current_task(next_task);
+            ready_mgr.add(next_task);
+            current_sp = next_task->sp;
+        }
     }
 
     void rtos_tick_handler() {
@@ -45,15 +42,16 @@ void idle_task() {
 uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)()) {
     uint32_t* sp = stack_top;
 
-    *(--sp) = 0x01000000;
-    *(--sp) = reinterpret_cast<uint32_t>(task_func) | 1;
-    *(--sp) = 0xFFFFFFFD;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
+    *(--sp) = 0x01000000;                                // xPSR (Thumb bit)
+    *(--sp) = reinterpret_cast<uint32_t>(task_func) | 1; // PC
+    *(--sp) = 0xFFFFFFFD;                                // LR (Return to Thread mode)
+    *(--sp) = 0;                                         // R12
+    *(--sp) = 0;                                         // R3
+    *(--sp) = 0;                                         // R2
+    *(--sp) = 0;                                         // R1
+    *(--sp) = 0;                                         // R0
 
+    // Registers R4-R11
     *(--sp) = 0;
     *(--sp) = 0;
     *(--sp) = 0;
@@ -66,26 +64,48 @@ uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)()) {
     return sp;
 }
 
-bool Scheduler::create_task(void (*task_func)()) {
-    if (task_count_ >= kMaxTasks) return false;
+detail::TaskControlBlock* Scheduler::create_task_impl(void (*task_func)(), uint8_t priority, bool reserved) noexcept {
+    ACRTOS_ASSERT(priority < kMaxPriorities);
+    if (priority >= kMaxPriorities) return nullptr;
 
-    auto& task = task_table_[task_count_];
-    uint32_t* stack_top = &task.stack[kStackSize];
-    task.sp = init_task_stack(stack_top, task_func);
-    task.state = TaskState::Ready;
+    port::CriticalSection guard;
 
+    const size_t capacity = reserved ? kMaxTasks : (kMaxTasks - 1);
+    if (task_count_ >= capacity) return nullptr;
+
+    auto& allocate_tcb = task_table_[task_count_];
+    uint32_t* stack_top = &allocate_tcb.stack[kStackSize];
+
+    allocate_tcb.sp = init_task_stack(stack_top, task_func);
+    allocate_tcb.state = TaskState::Ready;
+    allocate_tcb.priority = priority;
+
+    ready_mgr_.add(&allocate_tcb);
     task_count_++;
-    return true;
+    return &allocate_tcb;
 }
 
-void Scheduler::delay_ms(TickType ms) {
-    if (ms == 0) return;
-    task_table_[current_task_index_].delay_ticks = ms;
-    task_table_[current_task_index_].state = TaskState::Blocked;
+Task Scheduler::create_task(void (*task_func)(), uint8_t priority) noexcept {
+    detail::TaskControlBlock* new_tcb = create_task_impl(task_func, priority, false);
+    return Task(new_tcb);
+}
+
+void Scheduler::delay_ms(TickType ms) noexcept {
+    if (ms == 0 || current_task_ == nullptr) return;
+
+    {
+        port::CriticalSection guard;
+        ready_mgr_.remove(current_task_);
+        current_task_->delay_ticks = ms;
+        current_task_->state = TaskState::Blocked;
+    }
+
     task_yield();
 }
 
-void Scheduler::tick() {
+void Scheduler::tick() noexcept {
+    port::CriticalSection guard;
+
     for (size_t i = 0; i < task_count_; ++i) {
         if (task_table_[i].state == TaskState::Blocked) {
             if (task_table_[i].delay_ticks > 0) {
@@ -93,13 +113,66 @@ void Scheduler::tick() {
             }
             if (task_table_[i].delay_ticks == 0) {
                 task_table_[i].state = TaskState::Ready;
+                ready_mgr_.add(&task_table_[i]);
             }
         }
     }
 }
 
-void Scheduler::start() {
-    create_task(idle_task);
+void Scheduler::start() noexcept {
+    ACRTOS_ASSERT(!started_ && "Scheduler::start() called twice");
+    if (started_) return;
+    started_ = true;
+
+    create_task_impl(idle_task, 0, true);
+
+    port::start_hardware_and_yield();
+
+    while (true) {
+        asm volatile("wfi");
+    }
 }
 
 } // namespace acrtos
+
+namespace acrtos::detail {
+
+void ReadyManager::add(TaskControlBlock* task) noexcept {
+    if (!task) return;
+    const uint8_t prio = task->priority;
+
+    port::CriticalSection guard;
+    ready_lists_[prio].push_back(task);
+    ready_bitmask_ |= (1U << prio);
+}
+
+void ReadyManager::remove(TaskControlBlock* task) noexcept {
+    if (!task) return;
+    const uint8_t prio = task->priority;
+
+    port::CriticalSection guard;
+    ready_lists_[prio].remove(task);
+
+    if (ready_lists_[prio].is_empty()) {
+        ready_bitmask_ &= ~(1U << prio);
+    }
+}
+
+[[nodiscard]] TaskControlBlock* ReadyManager::get_highest_priority_task() noexcept {
+    port::CriticalSection guard;
+
+    if (ready_bitmask_ == 0) [[unlikely]] {
+        return nullptr;
+    }
+
+    const uint8_t top_prio = static_cast<uint8_t>(31 - __builtin_clz(ready_bitmask_));
+    TaskControlBlock* task = ready_lists_[top_prio].pop_front();
+
+    if (ready_lists_[top_prio].is_empty()) {
+        ready_bitmask_ &= ~(1U << top_prio);
+    }
+
+    return task;
+}
+
+} // namespace acrtos::detail

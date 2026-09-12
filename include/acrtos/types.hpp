@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include "acRtosConfig.hpp"
 
 namespace acrtos {
 
@@ -12,8 +13,5 @@ enum class TaskState : uint8_t {
     Blocked,
     Suspended
 };
-
-constexpr size_t kMaxTasks = 4;
-constexpr size_t kStackSize = 256;
 
 } // namespace acrtos

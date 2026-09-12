@@ -4,40 +4,35 @@
 
 .global PendSV_Handler
 .global task_yield
-.type PendSV_Handler, %function
-.thumb_func
-
 .extern current_sp
 .extern schedule_next_task
 
-task_yield:
-    ldr r0, =0xE000ED04   // SCB->ICSR
-    ldr r1, =0x10000000   // SCB_ICSR_PENDSVSET_Msk
-    str r1, [r0]
-    bx lr
-
+.type PendSV_Handler, %function
 PendSV_Handler:
     mrs r0, psp
-    cbz r0, start_first_task
+    cbz r0, skip_save
 
     stmdb r0!, {r4-r11}
     ldr r1, =current_sp
     str r0, [r1]
 
+skip_save:
     push {lr}
     bl schedule_next_task
     pop {lr}
 
-start_first_task:
-    ldr r1, =current_sp
-    ldr r0, [r1]
+    ldr r0, =current_sp
+    ldr r0, [r0]
 
     ldmia r0!, {r4-r11}
     msr psp, r0
 
-    mov r0, #2
-    msr control, r0
-    isb
+    orr lr, lr, #0x04
+    bx lr
 
-    ldr lr, =0xFFFFFFFD
+.type task_yield, %function
+task_yield:
+    ldr r0, =0xE000ED04       @ ICSR
+    ldr r1, =0x10000000       @ PENDSVSET
+    str r1, [r0]
     bx lr

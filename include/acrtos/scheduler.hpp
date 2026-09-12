@@ -1,31 +1,61 @@
 #pragma once
-#include "acrtos/tcb.hpp"
+#include "task.hpp"
+
+namespace acrtos::detail {
+
+constexpr size_t kMaxPriorities = 32;
+
+class ReadyManager {
+private:
+    TaskList ready_lists_[kMaxPriorities];
+    uint32_t ready_bitmask_{0};
+
+public:
+    constexpr ReadyManager() noexcept = default;
+    ReadyManager(const ReadyManager&) = delete;
+    ReadyManager& operator=(const ReadyManager&) = delete;
+
+    void add(TaskControlBlock* task) noexcept;
+    void remove(TaskControlBlock* task) noexcept;
+
+    [[nodiscard]] TaskControlBlock* get_highest_priority_task() noexcept;
+    [[nodiscard]] bool is_empty() const noexcept { return ready_bitmask_ == 0; }
+};
+
+} // namespace acrtos::detail
 
 namespace acrtos {
 
-class Scheduler {
+class Scheduler { 
+private:
+    Scheduler() = default;
+    
+    detail::TaskControlBlock* create_task_impl(void (*task_func)(), uint8_t priority, bool reserved) noexcept;
+    
+    detail::TaskControlBlock task_table_[kMaxTasks];
+    detail::TaskControlBlock* current_task_{nullptr};
+    detail::ReadyManager ready_mgr_;
+    uint8_t task_count_{0};
+    bool started_{false};
+    
 public:
-    static Scheduler& instance() {
+    static Scheduler& instance() noexcept {
         static Scheduler instance;
         return instance;
     }
 
-    bool create_task(void (*task_func)());
-    void start();
-    void delay_ms(TickType ms);
-    void tick();
+    Scheduler(const Scheduler&) = delete;
+    Scheduler& operator=(const Scheduler&) = delete;
 
-    TaskControlBlock& get_task(size_t index) { return task_table_[index]; }
-    size_t get_task_count() const { return task_count_; }
-    uint8_t get_current_index() const { return current_task_index_; }
-    void set_current_index(uint8_t idx) { current_task_index_ = idx; }
+    Task create_task(void (*task_func)(), uint8_t priority = 1) noexcept;
+    void start() noexcept;
+    void delay_ms(TickType ms) noexcept;
+    void tick() noexcept;
 
-private:
-    Scheduler() = default;
+    [[nodiscard]] detail::TaskControlBlock* get_current_task() noexcept { return current_task_; }
+    void set_current_task(detail::TaskControlBlock* task) noexcept { current_task_ = task; }
 
-    TaskControlBlock task_table_[kMaxTasks];
-    uint8_t task_count_{0};
-    volatile uint8_t current_task_index_{0};
+    [[nodiscard]] detail::ReadyManager& get_ready_manager() noexcept { return ready_mgr_; }
 };
 
 } // namespace acrtos
