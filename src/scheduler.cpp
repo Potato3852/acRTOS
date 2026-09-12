@@ -96,8 +96,8 @@ void Scheduler::delay_ms(TickType ms) noexcept {
     {
         port::CriticalSection guard;
         ready_mgr_.remove(current_task_);
-        current_task_->delay_ticks = ms;
         current_task_->state = TaskState::Blocked;
+        delay_list_.insert(current_task_, ms);
     }
 
     task_yield();
@@ -105,18 +105,7 @@ void Scheduler::delay_ms(TickType ms) noexcept {
 
 void Scheduler::tick() noexcept {
     port::CriticalSection guard;
-
-    for (size_t i = 0; i < task_count_; ++i) {
-        if (task_table_[i].state == TaskState::Blocked) {
-            if (task_table_[i].delay_ticks > 0) {
-                task_table_[i].delay_ticks--;
-            }
-            if (task_table_[i].delay_ticks == 0) {
-                task_table_[i].state = TaskState::Ready;
-                ready_mgr_.add(&task_table_[i]);
-            }
-        }
-    }
+    delay_list_.tick(ready_mgr_); // O(1)
 }
 
 void Scheduler::start() noexcept {

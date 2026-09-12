@@ -4,6 +4,7 @@
 namespace acrtos {
 
 namespace detail {
+class ReadyManager;
 
 struct TaskControlBlock {
     uint32_t* sp{nullptr};
@@ -30,6 +31,20 @@ public:
     TaskControlBlock* pop_front();
     void remove(TaskControlBlock* task);
     bool is_empty() const { return head == nullptr; }
+};
+
+class DelayList {
+private:
+    TaskControlBlock* head{nullptr};
+
+public:
+    DelayList() = default;
+
+    DelayList(const DelayList&) = delete;
+    DelayList& operator=(const DelayList&) = delete;
+
+    void insert(TaskControlBlock* task, TickType ticks) noexcept;
+    void tick(ReadyManager& ready_mgr) noexcept;
 };
 
 } // namespace acrtos::detail

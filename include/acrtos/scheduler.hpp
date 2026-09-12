@@ -35,6 +35,7 @@ private:
     detail::TaskControlBlock task_table_[kMaxTasks];
     detail::TaskControlBlock* current_task_{nullptr};
     detail::ReadyManager ready_mgr_;
+    detail::DelayList delay_list_;
     uint8_t task_count_{0};
     bool started_{false};
     
