@@ -1,10 +1,24 @@
+/**
+ * @file scheduler.hpp
+ * @brief Task scheduler and RTOS execution context management.
+ * 
+ * @details Implements a preemprive O(1) scheduler based on a priority bitmask.
+ * Supports up to <kMaxPriority> priority levels and delay management via Delta List.
+ * @warning Scheduler methods are not intended to be called from interrupt service routines (ISRs) unless the `_from_isr` suffix is explicitly specified.
+ */
+
 #pragma once
 #include "task.hpp"
+#include "acRtosConfig.hpp"
 
 namespace acrtos::detail {
 
-constexpr size_t kMaxPriorities = 32;
-
+/**
+ * @class ReadyManager
+ * @brief Manages the queues of tasks ready to execute.
+ * @details Utilizes an array of task lists and a hardware-optimized priority 
+ *          bitmask to find the highest-priority task in O(1) time.
+ */
 class ReadyManager {
 private:
     TaskList ready_lists_[kMaxPriorities];
@@ -26,6 +40,13 @@ public:
 
 namespace acrtos {
 
+/**
+ * @class Scheduler
+ * @brief The central brain of the RTOS (Singleton).
+ * @details Manages all task allocations, context switching, and timing. 
+ *          Tasks are statically allocated in an internal memory pool to 
+ *          avoid dynamic memory fragmentation.
+ */
 class Scheduler { 
 private:
     Scheduler() = default;
@@ -40,6 +61,10 @@ private:
     bool started_{false};
     
 public:
+    /**
+     * @brief Retrieves the singleton instance of the Scheduler.
+     * @return Reference to the Scheduler.
+     */
     static Scheduler& instance() noexcept {
         static Scheduler instance;
         return instance;
@@ -48,8 +73,24 @@ public:
     Scheduler(const Scheduler&) = delete;
     Scheduler& operator=(const Scheduler&) = delete;
 
+    /**
+     * @brief Creates a new task and adds it to the Ready queue.
+     * @param task_func Pointer to the task's main function.
+     * @param priority Task priority (higher number = higher priority).
+     * @return Task A handle to the newly created task.
+     */
     Task create_task(void (*task_func)(), uint8_t priority = 1) noexcept;
+
+    /**
+     * @brief Starts the RTOS scheduler and hardware timers.
+     * @warning This function never returns.
+     */
     void start() noexcept;
+
+    /**
+     * @brief Blocks the currently running task for a specified duration.
+     * @param ms The number of milliseconds to sleep.
+     */
     void delay_ms(TickType ms) noexcept;
     void tick() noexcept;
 

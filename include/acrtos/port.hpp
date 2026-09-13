@@ -1,3 +1,10 @@
+/**
+ * @file port.hpp
+ * @brief Hardware Abstraction Layer (HAL) for ARM Cortex-M architecture.
+ * @details Contains architecture-specific assembly instructions, interrupt 
+ *          management, and stack initialization routines.
+ */
+
 #pragma once
 #include <cstdint>
 
@@ -8,9 +15,9 @@ extern "C" {
     void schedule_next_task();
 }
 
-namespace acrtos {
+namespace acrtos::detail {
     uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)());
-}
+} // namespace acrtos::detail
 
 namespace acrtos::port {
 
@@ -37,9 +44,18 @@ inline uint32_t enter_critical() noexcept { return 0; }
 inline void exit_critical(uint32_t) noexcept {}
 #endif
 
+/**
+ * @class CriticalSection
+ * @brief RAII wrapper for managing hardware interrupts.
+ * @details Disables interrupts upon construction and restores the previous 
+ *          interrupt state upon destruction (going out of scope).
+ */
 class CriticalSection {
 public:
+    /** @brief Disables interrupts and saves the PRIMASK state. */
     CriticalSection() noexcept : primask_(enter_critical()) {}
+    
+    /** @brief Restores the previously saved PRIMASK state. */
     ~CriticalSection() noexcept { exit_critical(primask_); }
 
     CriticalSection(const CriticalSection&) = delete;
