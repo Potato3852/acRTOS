@@ -2,6 +2,7 @@
 #include "types.hpp"
 
 namespace acrtos {
+class Scheduler;
 
 namespace detail {
 class ReadyManager;
@@ -30,7 +31,7 @@ public:
     void push_back(TaskControlBlock* task);
     TaskControlBlock* pop_front();
     void remove(TaskControlBlock* task);
-    bool is_empty() const { return head == nullptr; }
+    [[nodiscard]] bool is_empty() const { return head == nullptr; }
 };
 
 class DelayList {
@@ -44,6 +45,7 @@ public:
     DelayList& operator=(const DelayList&) = delete;
 
     void insert(TaskControlBlock* task, TickType ticks) noexcept;
+    void remove(TaskControlBlock* task) noexcept;
     void tick(ReadyManager& ready_mgr) noexcept;
 };
 
@@ -56,13 +58,12 @@ public:
     Task() = default;
     explicit Task(detail::TaskControlBlock* tcb) noexcept : tcb_(tcb) {}
 
-    [[nodiscard]] uint8_t get_priority() const noexcept {
-        return tcb_ ? tcb_->priority : 0;
-    }
+    void suspend() noexcept;
+    void resume() noexcept;
 
-    [[nodiscard]] bool is_valid() const noexcept {
-        return tcb_ != nullptr;
-    }
+    [[nodiscard]] TaskState get_state() const noexcept { return tcb_ ? tcb_->state : TaskState::Suspended; }
+    [[nodiscard]] uint8_t get_priority() const noexcept { return tcb_ ? tcb_->priority : 0; }
+    [[nodiscard]] bool is_valid() const noexcept { return tcb_ != nullptr; }
 };
 
 } // namespace acrtos

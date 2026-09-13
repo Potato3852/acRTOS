@@ -13,6 +13,7 @@ extern "C" {
             prev_task->sp = current_sp;
             if (prev_task->state == acrtos::TaskState::Running) {
                 prev_task->state = acrtos::TaskState::Ready;
+                ready_mgr.add(prev_task);
             }
         }
 
@@ -21,7 +22,6 @@ extern "C" {
         if (next_task != nullptr) {
             next_task->state = acrtos::TaskState::Running;
             sched.set_current_task(next_task);
-            ready_mgr.add(next_task);
             current_sp = next_task->sp;
         }
     }
@@ -95,7 +95,6 @@ void Scheduler::delay_ms(TickType ms) noexcept {
 
     {
         port::CriticalSection guard;
-        ready_mgr_.remove(current_task_);
         current_task_->state = TaskState::Blocked;
         delay_list_.insert(current_task_, ms);
     }
@@ -119,6 +118,38 @@ void Scheduler::start() noexcept {
 
     while (true) {
         asm volatile("wfi");
+    }
+}
+
+void Scheduler::suspend_task(detail::TaskControlBlock* task) noexcept {
+    if (!task || task->state == TaskState::Suspended) return;
+
+    port::CriticalSection guard;
+
+    if (task->state == TaskState::Ready) {
+        ready_mgr_.remove(task);
+    } else if (task->state == TaskState::Blocked) {
+        delay_list_.remove(task);
+    }
+
+    const bool is_current = (task == current_task_);
+    task->state = TaskState::Suspended;
+
+    if (is_current && started_) {
+        task_yield();
+    }
+}
+
+void Scheduler::resume_task(detail::TaskControlBlock* task) noexcept {
+    if (!task || task->state != TaskState::Suspended) return;
+
+    port::CriticalSection guard;
+
+    task->state = TaskState::Ready;
+    ready_mgr_.add(task);
+
+    if (started_ && current_task_ && task->priority > current_task_->priority) {
+        task_yield();
     }
 }
 

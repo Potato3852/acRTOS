@@ -3,6 +3,18 @@
 
 namespace acrtos {
 
+void Task::suspend() noexcept {
+    if (tcb_) {
+        Scheduler::instance().suspend_task(tcb_);
+    }
+}
+
+void Task::resume() noexcept {
+    if (tcb_) {
+        Scheduler::instance().resume_task(tcb_);
+    }
+}
+
 namespace detail {
 
 void TaskList::push_back(TaskControlBlock* task) {
@@ -98,12 +110,31 @@ void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
     }
 }
 
+void DelayList::remove(TaskControlBlock* task) noexcept {
+    if (!task || !head) return;
+
+    if (task->next != nullptr) {
+        task->next->delay_ticks += task->delay_ticks;
+        task->next->prev = task->prev;
+    }
+
+    if (task == head) {
+        head = task->next;
+    } else if (task->prev != nullptr) {
+        task->prev->next = task->next;
+    }
+
+    task->next = nullptr;
+    task->prev = nullptr;
+    task->delay_ticks = 0;
+}
+
 void DelayList::tick(ReadyManager& ready_mgr) noexcept {
     if (head == nullptr) return;
 
     head->delay_ticks -= 1;
 
-    while (head != nullptr and head->delay_ticks == 0) {
+    while (head != nullptr && head->delay_ticks == 0) {
         auto temp = head;
         head = head->next;
         if (head != nullptr) {
@@ -119,4 +150,4 @@ void DelayList::tick(ReadyManager& ready_mgr) noexcept {
 
 } // namespace acrtos::detail
 
-} // namespace acrctos
+} // namespace acrtos

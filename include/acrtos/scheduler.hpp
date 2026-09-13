@@ -55,8 +55,10 @@ public:
 
     [[nodiscard]] detail::TaskControlBlock* get_current_task() noexcept { return current_task_; }
     void set_current_task(detail::TaskControlBlock* task) noexcept { current_task_ = task; }
-
     [[nodiscard]] detail::ReadyManager& get_ready_manager() noexcept { return ready_mgr_; }
+
+    void suspend_task(detail::TaskControlBlock* task) noexcept;
+    void resume_task(detail::TaskControlBlock* task) noexcept;
 };
 
 } // namespace acrtos
