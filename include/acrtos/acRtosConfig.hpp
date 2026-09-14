@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace acrtos {
+namespace acrtos::config {
 
 /** @brief Maximum number of active tasks, including the idle task. */
 inline constexpr std::size_t kMaxTasks = 4;
@@ -23,6 +23,16 @@ inline constexpr std::size_t kMaxPriorities = 32;
 
 /** @brief System tick interval in milliseconds. */
 inline constexpr std::uint32_t kTickRateMs = 1;
+
+// === Compile-Time Assertions ===
+static_assert(kMaxPriorities <= 32,
+              "ReadyManager uses a 32-bit bitmask. kMaxPriorities cannot exceed 32.");
+static_assert(kMaxPriorities > 0, 
+              "System requires at least 1 priority level.");
+static_assert(kMaxTasks > 0, 
+              "System requires at least 1 task (the Idle task).");
+static_assert((kStackSize * sizeof(uint32_t)) % 8 == 0, 
+               "Stack size must be 8-byte aligned to comply with ARM Cortex-M AAPCS.");
 
 } // namespace acrtos
 

@@ -9,7 +9,7 @@
 namespace acrtos {
 class Scheduler;
 
-namespace detail {
+namespace internal {
 class ReadyManager;
 
 /**
@@ -22,7 +22,7 @@ struct TaskControlBlock {
     uint32_t* sp{nullptr};
     TaskState state{TaskState::Ready};
     TickType delay_ticks{0};
-    uint32_t stack[kStackSize]{0};
+    uint32_t stack[config::kStackSize]{0};
 
     uint8_t priority{0};
     TaskControlBlock* prev{nullptr};
@@ -66,7 +66,7 @@ public:
     void tick(ReadyManager& ready_mgr) noexcept;
 };
 
-} // namespace acrtos::detail
+} // namespace acrtos::internal
 
 /**
  * @class Task
@@ -79,10 +79,10 @@ private:
     /**
      * @brief Private TCB for secure work with Task
      */
-    detail::TaskControlBlock* tcb_{nullptr};
+    internal::TaskControlBlock* tcb_{nullptr};
 public:
     Task() = default;
-    explicit Task(detail::TaskControlBlock* tcb) noexcept : tcb_(tcb) {}
+    explicit Task(internal::TaskControlBlock* tcb) noexcept : tcb_(tcb) {}
 
     /**
      * @brief A safe function for suspending the current task.
@@ -111,6 +111,10 @@ public:
      * @return True - task is valid. False - task is broken.
      */
     [[nodiscard]] bool is_valid() const noexcept { return tcb_ != nullptr; }
+
 };
+
+// === Compile-Time asserts ===
+static_assert(sizeof(Task) == sizeof(void*), "Task facade must be zero-overhead!");
 
 } // namespace acrtos

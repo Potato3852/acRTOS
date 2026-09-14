@@ -33,61 +33,19 @@ extern "C" {
 
 namespace acrtos {
 
-void idle_task() {
-    while (true) {
-        asm volatile("wfi");
-    }
-}
-
-uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)()) {
-    uint32_t* sp = stack_top;
-
-    *(--sp) = 0x01000000;                                // xPSR (Thumb bit)
-    *(--sp) = reinterpret_cast<uint32_t>(task_func) | 1; // PC
-    *(--sp) = 0xFFFFFFFD;                                // LR (Return to Thread mode)
-    *(--sp) = 0;                                         // R12
-    *(--sp) = 0;                                         // R3
-    *(--sp) = 0;                                         // R2
-    *(--sp) = 0;                                         // R1
-    *(--sp) = 0;                                         // R0
-
-    // Registers R4-R11
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-    *(--sp) = 0;
-
-    return sp;
-}
-
-detail::TaskControlBlock* Scheduler::create_task_impl(void (*task_func)(), uint8_t priority, bool reserved) noexcept {
-    ACRTOS_ASSERT(priority < kMaxPriorities);
-    if (priority >= kMaxPriorities) return nullptr;
-
+internal::TaskControlBlock* Scheduler::allocate_tcb() noexcept {
     port::CriticalSection guard;
-
-    const size_t capacity = reserved ? kMaxTasks : (kMaxTasks - 1);
-    if (task_count_ >= capacity) return nullptr;
-
-    auto& allocate_tcb = task_table_[task_count_];
-    uint32_t* stack_top = &allocate_tcb.stack[kStackSize];
-
-    allocate_tcb.sp = init_task_stack(stack_top, task_func);
-    allocate_tcb.state = TaskState::Ready;
-    allocate_tcb.priority = priority;
-
-    ready_mgr_.add(&allocate_tcb);
-    task_count_++;
-    return &allocate_tcb;
+    if (task_count_ >= config::kMaxTasks) return nullptr;
+    
+    auto& tcb = task_table_[task_count_++];
+    tcb.state = TaskState::Suspended;
+    return &tcb;
 }
 
-Task Scheduler::create_task(void (*task_func)(), uint8_t priority) noexcept {
-    detail::TaskControlBlock* new_tcb = create_task_impl(task_func, priority, false);
-    return Task(new_tcb);
+void Scheduler::add_to_ready_queue(internal::TaskControlBlock* tcb) noexcept {
+    port::CriticalSection guard;
+    tcb->state = TaskState::Ready;
+    ready_mgr_.add(tcb);
 }
 
 void Scheduler::delay_ms(TickType ms) noexcept {
@@ -112,7 +70,9 @@ void Scheduler::start() noexcept {
     if (started_) return;
     started_ = true;
 
-    create_task_impl(idle_task, 0, true);
+    create_task([]() {
+        while (true) { asm volatile("wfi"); }
+    }, 0);
 
     port::start_hardware_and_yield();
 
@@ -121,7 +81,7 @@ void Scheduler::start() noexcept {
     }
 }
 
-void Scheduler::suspend_task(detail::TaskControlBlock* task) noexcept {
+void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
     if (!task || task->state == TaskState::Suspended) return;
 
     port::CriticalSection guard;
@@ -140,7 +100,7 @@ void Scheduler::suspend_task(detail::TaskControlBlock* task) noexcept {
     }
 }
 
-void Scheduler::resume_task(detail::TaskControlBlock* task) noexcept {
+void Scheduler::resume_task(internal::TaskControlBlock* task) noexcept {
     if (!task || task->state != TaskState::Suspended) return;
 
     port::CriticalSection guard;
@@ -155,7 +115,25 @@ void Scheduler::resume_task(detail::TaskControlBlock* task) noexcept {
 
 } // namespace acrtos
 
-namespace acrtos::detail {
+namespace acrtos::internal {
+
+uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)(void*), void* param) {
+    uint32_t* sp = stack_top;
+
+    *(--sp) = 0x01000000;                                // xPSR (Thumb bit)
+    *(--sp) = reinterpret_cast<uint32_t>(task_func) | 1; // PC
+    *(--sp) = 0xFFFFFFFD;                                // LR (Return to Thread mode)
+    *(--sp) = 0;                                         // R12
+    *(--sp) = 0;                                         // R3
+    *(--sp) = 0;                                         // R2
+    *(--sp) = 0;                                         // R1
+    *(--sp) = reinterpret_cast<uint32_t>(param);         // R0
+
+    // Registers R4-R11
+    for (int i = 0; i < 8; ++i) *(--sp) = 0;
+
+    return sp;
+}
 
 void ReadyManager::add(TaskControlBlock* task) noexcept {
     if (!task) return;
@@ -195,4 +173,4 @@ void ReadyManager::remove(TaskControlBlock* task) noexcept {
     return task;
 }
 
-} // namespace acrtos::detail
+} // namespace acrtos::internal

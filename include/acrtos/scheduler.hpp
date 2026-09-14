@@ -10,8 +10,13 @@
 #pragma once
 #include "task.hpp"
 #include "acRtosConfig.hpp"
+#include <concepts>
+#include <utility>
+#include <new>
 
-namespace acrtos::detail {
+namespace acrtos::internal {
+
+uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)(void*), void* param);
 
 /**
  * @class ReadyManager
@@ -21,7 +26,7 @@ namespace acrtos::detail {
  */
 class ReadyManager {
 private:
-    TaskList ready_lists_[kMaxPriorities];
+    TaskList ready_lists_[config::kMaxPriorities];
     uint32_t ready_bitmask_{0};
 
 public:
@@ -36,7 +41,7 @@ public:
     [[nodiscard]] bool is_empty() const noexcept { return ready_bitmask_ == 0; }
 };
 
-} // namespace acrtos::detail
+} // namespace acrtos::internal
 
 namespace acrtos {
 
@@ -50,13 +55,15 @@ namespace acrtos {
 class Scheduler { 
 private:
     Scheduler() = default;
+
+    internal::TaskControlBlock* allocate_tcb() noexcept;
+
+    void add_to_ready_queue(internal::TaskControlBlock* tcb) noexcept;
     
-    detail::TaskControlBlock* create_task_impl(void (*task_func)(), uint8_t priority, bool reserved) noexcept;
-    
-    detail::TaskControlBlock task_table_[kMaxTasks];
-    detail::TaskControlBlock* current_task_{nullptr};
-    detail::ReadyManager ready_mgr_;
-    detail::DelayList delay_list_;
+    internal::TaskControlBlock task_table_[config::kMaxTasks];
+    internal::TaskControlBlock* current_task_{nullptr};
+    internal::ReadyManager ready_mgr_;
+    internal::DelayList delay_list_;
     uint8_t task_count_{0};
     bool started_{false};
     
@@ -73,13 +80,41 @@ public:
     Scheduler(const Scheduler&) = delete;
     Scheduler& operator=(const Scheduler&) = delete;
 
-    /**
-     * @brief Creates a new task and adds it to the Ready queue.
-     * @param task_func Pointer to the task's main function.
-     * @param priority Task priority (higher number = higher priority).
-     * @return Task A handle to the newly created task.
-     */
-    Task create_task(void (*task_func)(), uint8_t priority = 1) noexcept;
+    template <typename F>
+    requires std::invocable<F>
+    Task create_task(F&& callable, uint8_t priority = 1) noexcept {
+        internal::TaskControlBlock* tcb = allocate_tcb();
+        if (!tcb) return Task{nullptr};
+
+        using DecayedF = std::decay_t<F>;
+
+        static_assert(sizeof(DecayedF) < (config::kStackSize * sizeof(uint32_t)) / 2,
+                      "Callable object is too large for the task stack!");
+
+        uint8_t* stack_end = reinterpret_cast<uint8_t*>(&tcb->stack[config::kStackSize]);
+
+        stack_end -= sizeof(DecayedF);
+
+        std::size_t align_offset = reinterpret_cast<std::uintptr_t>(stack_end) % 8;
+        stack_end -= align_offset;
+
+        DecayedF* stored_callable = new (stack_end) DecayedF(std::forward<F>(callable));
+        uint32_t* hw_stack_top = reinterpret_cast<uint32_t*>(stack_end);
+
+        auto trampoline = [](void* ctx) {
+            auto* fn = static_cast<DecayedF*>(ctx);
+            (*fn)();
+
+            Scheduler::instance().suspend_task(Scheduler::instance().get_current_task());
+            while(true) { asm volatile("wfi"); }
+        };
+
+        tcb->sp = internal::init_task_stack(hw_stack_top, trampoline, stored_callable);
+        tcb->priority = priority;
+
+        add_to_ready_queue(tcb);
+        return Task(tcb);
+    }
 
     /**
      * @brief Starts the RTOS scheduler and hardware timers.
@@ -94,12 +129,12 @@ public:
     void delay_ms(TickType ms) noexcept;
     void tick() noexcept;
 
-    [[nodiscard]] detail::TaskControlBlock* get_current_task() noexcept { return current_task_; }
-    void set_current_task(detail::TaskControlBlock* task) noexcept { current_task_ = task; }
-    [[nodiscard]] detail::ReadyManager& get_ready_manager() noexcept { return ready_mgr_; }
+    [[nodiscard]] internal::TaskControlBlock* get_current_task() noexcept { return current_task_; }
+    void set_current_task(internal::TaskControlBlock* task) noexcept { current_task_ = task; }
+    [[nodiscard]] internal::ReadyManager& get_ready_manager() noexcept { return ready_mgr_; }
 
-    void suspend_task(detail::TaskControlBlock* task) noexcept;
-    void resume_task(detail::TaskControlBlock* task) noexcept;
+    void suspend_task(internal::TaskControlBlock* task) noexcept;
+    void resume_task(internal::TaskControlBlock* task) noexcept;
 };
 
 } // namespace acrtos

@@ -15,13 +15,12 @@ void Task::resume() noexcept {
     }
 }
 
-namespace detail {
+namespace internal {
 
 void TaskList::push_back(TaskControlBlock* task) {
-    if (!task) return;
+    ACRTOS_ASSERT(task != nullptr && "Attempt to push nullptr to TaskList");
 
     task->next = nullptr;
-
     if (tail == nullptr) {
         task->prev = nullptr;
         head = task;
@@ -71,7 +70,7 @@ void TaskList::remove(TaskControlBlock* task) {
 }
 
 void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
-    if (!task) return;
+    ACRTOS_ASSERT(task != nullptr && "Attempt to insert nullptr to DelayList");
 
     if (head == nullptr) {
         task->delay_ticks = ticks;
@@ -82,7 +81,7 @@ void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
     }
 
     auto current = head;
-    detail::TaskControlBlock* prev = nullptr;
+    internal::TaskControlBlock* prev = nullptr;
 
     while (current != nullptr) {
         if (ticks >= current->delay_ticks) {
@@ -148,6 +147,6 @@ void DelayList::tick(ReadyManager& ready_mgr) noexcept {
     }
 }
 
-} // namespace acrtos::detail
+} // namespace acrtos::internal
 
 } // namespace acrtos

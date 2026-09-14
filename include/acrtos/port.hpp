@@ -15,9 +15,9 @@ extern "C" {
     void schedule_next_task();
 }
 
-namespace acrtos::detail {
-    uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)());
-} // namespace acrtos::detail
+namespace acrtos::internal {
+    uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)(void*), void* param);
+} // namespace acrtos::internal
 
 namespace acrtos::port {
 
