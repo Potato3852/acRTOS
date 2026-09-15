@@ -89,7 +89,12 @@ void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
     if (task->state == TaskState::Ready) {
         ready_mgr_.remove(task);
     } else if (task->state == TaskState::Blocked) {
-        delay_list_.remove(task);
+        if (task->wait_list != nullptr) {
+            task->wait_list->remove(task);
+            task->wait_list = nullptr;
+        } else {
+            delay_list_.remove(task);
+        }
     }
 
     const bool is_current = (task == current_task_);
@@ -98,6 +103,17 @@ void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
     if (is_current && started_) {
         task_yield();
     }
+}
+
+bool Scheduler::make_task_ready(internal::TaskControlBlock* task) noexcept {
+    if (!task) return false;
+
+    task->state = TaskState::Ready;
+    task->wait_list = nullptr;
+    ready_mgr_.add(task);
+
+    return started_ && current_task_ != nullptr &&
+           task->priority > current_task_->priority;
 }
 
 void Scheduler::resume_task(internal::TaskControlBlock* task) noexcept {

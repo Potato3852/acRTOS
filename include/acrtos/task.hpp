@@ -11,6 +11,7 @@ class Scheduler;
 
 namespace internal {
 class ReadyManager;
+class TaskList;
 
 /**
  * @struct TaskControlBlock
@@ -27,7 +28,9 @@ struct TaskControlBlock {
     uint8_t priority{0};
     TaskControlBlock* prev{nullptr};
     TaskControlBlock* next{nullptr};
-};   
+    /** @brief Non-null when blocked on a WaitQueue (not on DelayList). */
+    TaskList* wait_list{nullptr};
+};
 
 class TaskList {
 private:
@@ -40,6 +43,11 @@ public:
     TaskList& operator=(TaskList&) = delete;
 
     void push_back(TaskControlBlock* task);
+    /**
+     * @brief Insert so higher priority is closer to the head.
+     *        Equal priorities stay FIFO (new task goes after existing equals).
+     */
+    void insert_by_priority(TaskControlBlock* task);
     TaskControlBlock* pop_front();
     void remove(TaskControlBlock* task);
     [[nodiscard]] bool is_empty() const { return head == nullptr; }

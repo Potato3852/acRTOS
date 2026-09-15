@@ -5,7 +5,6 @@
  *          such as maximum task count and default stack sizes. Modifying 
  *          these values directly impacts the kernel's RAM footprint.
  */
-
 #pragma once
 #include <cstddef>
 #include <cstdint>

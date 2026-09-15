@@ -135,6 +135,12 @@ public:
 
     void suspend_task(internal::TaskControlBlock* task) noexcept;
     void resume_task(internal::TaskControlBlock* task) noexcept;
+
+    /**
+     * @brief Move a waiting task into the ready lists. Does not yield.
+     * @return true if the woken task should preempt the current one.
+     */
+    bool make_task_ready(internal::TaskControlBlock* task) noexcept;
 };
 
 } // namespace acrtos

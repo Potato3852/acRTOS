@@ -32,6 +32,34 @@ void TaskList::push_back(TaskControlBlock* task) {
     }
 }
 
+void TaskList::insert_by_priority(TaskControlBlock* task) {
+    ACRTOS_ASSERT(task != nullptr && "Attempt to insert nullptr into TaskList");
+
+    if (head == nullptr) {
+        push_back(task);
+        return;
+    }
+
+    TaskControlBlock* current = head;
+    while (current != nullptr && current->priority >= task->priority) {
+        current = current->next;
+    }
+
+    if (current == nullptr) {
+        push_back(task);
+        return;
+    }
+
+    task->next = current;
+    task->prev = current->prev;
+    if (current->prev != nullptr) {
+        current->prev->next = task;
+    } else {
+        head = task;
+    }
+    current->prev = task;
+}
+
 TaskControlBlock* TaskList::pop_front() {
     if (head == nullptr) return nullptr;
 
