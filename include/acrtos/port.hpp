@@ -1,23 +1,26 @@
 /**
  * @file port.hpp
- * @brief Hardware Abstraction Layer (HAL) for ARM Cortex-M architecture.
- * @details Contains architecture-specific assembly instructions, interrupt 
- *          management, and stack initialization routines.
+ * @brief Cortex-M4/M4F hardware port (no vendor HAL).
+ *
+ * Critical sections use PRIMASK (all IRQs off). Context switch is PendSV.
+ * SysTick lives in this port: the application must not define SysTick_Handler
+ * unless it is a strong override that still calls rtos_tick_handler().
  */
-
 #pragma once
 #include <cstdint>
+#include "acRtosConfig.hpp"
 
 extern "C" {
     extern uint32_t* current_sp;
     void task_yield();
     void rtos_tick_handler();
     void schedule_next_task();
+    void acrtos_tick_hook(void);
 }
 
 namespace acrtos::internal {
     uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)(void*), void* param);
-} // namespace acrtos::internal
+}
 
 namespace acrtos::port {
 
@@ -45,17 +48,12 @@ inline void exit_critical(uint32_t) noexcept {}
 #endif
 
 /**
- * @class CriticalSection
- * @brief RAII wrapper for managing hardware interrupts.
- * @details Disables interrupts upon construction and restores the previous 
- *          interrupt state upon destruction (going out of scope).
+ * @brief RAII lock: constructor disables IRQs, destructor restores the previous mask.
+ * Nested locks are safe because each instance remembers its own PRIMASK.
  */
 class CriticalSection {
 public:
-    /** @brief Disables interrupts and saves the PRIMASK state. */
     CriticalSection() noexcept : primask_(enter_critical()) {}
-    
-    /** @brief Restores the previously saved PRIMASK state. */
     ~CriticalSection() noexcept { exit_critical(primask_); }
 
     CriticalSection(const CriticalSection&) = delete;
@@ -65,6 +63,11 @@ private:
     uint32_t primask_;
 };
 
-void start_hardware_and_yield() noexcept;
+/** @brief Override the default kCpuHz if the app programmed a different SYSCLK. */
+void set_cpu_hz(std::uint32_t hz) noexcept;
+[[nodiscard]] std::uint32_t cpu_hz() noexcept;
+
+/** @brief Program PendSV + SysTick and kick the first context switch. Does not return. */
+[[noreturn]] void start_hardware_and_yield() noexcept;
 
 } // namespace acrtos::port

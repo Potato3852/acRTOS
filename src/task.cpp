@@ -1,5 +1,5 @@
-#include "task.hpp"
-#include "scheduler.hpp"
+#include "acrtos/task.hpp"
+#include "acrtos/scheduler.hpp"
 
 namespace acrtos {
 
@@ -18,7 +18,7 @@ void Task::resume() noexcept {
 namespace internal {
 
 void TaskList::push_back(TaskControlBlock* task) {
-    ACRTOS_ASSERT(task != nullptr && "Attempt to push nullptr to TaskList");
+    ACRTOS_ASSERT(task != nullptr);
 
     task->next = nullptr;
     if (tail == nullptr) {
@@ -33,7 +33,7 @@ void TaskList::push_back(TaskControlBlock* task) {
 }
 
 void TaskList::insert_by_priority(TaskControlBlock* task) {
-    ACRTOS_ASSERT(task != nullptr && "Attempt to insert nullptr into TaskList");
+    ACRTOS_ASSERT(task != nullptr);
 
     if (head == nullptr) {
         push_back(task);
@@ -61,7 +61,9 @@ void TaskList::insert_by_priority(TaskControlBlock* task) {
 }
 
 TaskControlBlock* TaskList::pop_front() {
-    if (head == nullptr) return nullptr;
+    if (head == nullptr) {
+        return nullptr;
+    }
 
     TaskControlBlock* task = head;
     head = head->next;
@@ -74,12 +76,13 @@ TaskControlBlock* TaskList::pop_front() {
 
     task->next = nullptr;
     task->prev = nullptr;
-
     return task;
 }
 
 void TaskList::remove(TaskControlBlock* task) {
-    if (!task) return;
+    if (!task) {
+        return;
+    }
 
     if (task->prev != nullptr) {
         task->prev->next = task->next;
@@ -98,7 +101,7 @@ void TaskList::remove(TaskControlBlock* task) {
 }
 
 void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
-    ACRTOS_ASSERT(task != nullptr && "Attempt to insert nullptr to DelayList");
+    ACRTOS_ASSERT(task != nullptr);
 
     if (head == nullptr) {
         task->delay_ticks = ticks;
@@ -109,7 +112,7 @@ void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
     }
 
     auto current = head;
-    internal::TaskControlBlock* prev = nullptr;
+    TaskControlBlock* prev = nullptr;
 
     while (current != nullptr) {
         if (ticks >= current->delay_ticks) {
@@ -138,7 +141,9 @@ void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
 }
 
 void DelayList::remove(TaskControlBlock* task) noexcept {
-    if (!task || !head) return;
+    if (!task || !head) {
+        return;
+    }
 
     if (task->next != nullptr) {
         task->next->delay_ticks += task->delay_ticks;
@@ -157,9 +162,13 @@ void DelayList::remove(TaskControlBlock* task) noexcept {
 }
 
 void DelayList::tick(ReadyManager& ready_mgr) noexcept {
-    if (head == nullptr) return;
+    if (head == nullptr) {
+        return;
+    }
 
-    head->delay_ticks -= 1;
+    if (head->delay_ticks > 0) {
+        head->delay_ticks -= 1;
+    }
 
     while (head != nullptr && head->delay_ticks == 0) {
         auto temp = head;
@@ -175,6 +184,6 @@ void DelayList::tick(ReadyManager& ready_mgr) noexcept {
     }
 }
 
-} // namespace acrtos::internal
+} // namespace internal
 
 } // namespace acrtos

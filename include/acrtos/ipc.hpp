@@ -8,10 +8,8 @@
 namespace acrtos::internal {
 
 /**
- * @class WaitQueue
- * @brief Ordered list of tasks blocked on one sync object.
- * @details Knows only how to park a task and how to pick the next one to
- *          wake (highest priority, FIFO among equals). 
+ * @brief Ordered list of tasks blocked on one object.
+ * Highest priority is woken first; equals stay FIFO.
  */
 class WaitQueue {
 private:
@@ -32,8 +30,7 @@ public:
 namespace acrtos {
 
 /**
- * @class Semaphore
- * @brief Counting semaphore (no timeout, not ISR-safe yet).
+ * @brief Counting semaphore. Not ISR-safe (no give_from_isr yet). No timeout. 
  */
 class Semaphore {
 private:

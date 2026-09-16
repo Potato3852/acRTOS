@@ -1,4 +1,4 @@
-#include "acRtosConfig.hpp"
+#include "acrtos/acRtosConfig.hpp"
 
 extern "C" __attribute__((weak)) void acrtos_assert_failed(const char* file, int line) {
     (void)file;
@@ -10,6 +10,5 @@ extern "C" __attribute__((weak)) void acrtos_assert_failed(const char* file, int
 #endif
 
     while (true) {
-        // Intentionally empty
     }
 }

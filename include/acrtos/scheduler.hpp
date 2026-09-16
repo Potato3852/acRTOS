@@ -1,28 +1,26 @@
 /**
  * @file scheduler.hpp
- * @brief Task scheduler and RTOS execution context management.
- * 
- * @details Implements a preemprive O(1) scheduler based on a priority bitmask.
- * Supports up to <kMaxPriority> priority levels and delay management via Delta List.
- * @warning Scheduler methods are not intended to be called from interrupt service routines (ISRs) unless the `_from_isr` suffix is explicitly specified.
+ * @brief Preemptive O(1) scheduler (priority bitmask + ready lists).
+ *
+ * Do not call these methods from an ISR unless a dedicated `_from_isr` API
+ * exists (none yet). Ticking is done from the port's SysTick handler.
  */
-
 #pragma once
 #include "task.hpp"
+#include "port.hpp"
 #include "acRtosConfig.hpp"
+
+#include <cstddef>
+#include <type_traits>
 #include <concepts>
 #include <utility>
 #include <new>
 
 namespace acrtos::internal {
 
-uint32_t* init_task_stack(uint32_t* stack_top, void (*task_func)(void*), void* param);
-
 /**
- * @class ReadyManager
- * @brief Manages the queues of tasks ready to execute.
- * @details Utilizes an array of task lists and a hardware-optimized priority 
- *          bitmask to find the highest-priority task in O(1) time.
+ * @brief One FIFO list per priority plus a bitmask of non-empty lists.
+ * Highest ready priority is 31 - clz(mask) — constant time on Cortex-M.
  */
 class ReadyManager {
 private:
@@ -38,6 +36,7 @@ public:
     void remove(TaskControlBlock* task) noexcept;
 
     [[nodiscard]] TaskControlBlock* get_highest_priority_task() noexcept;
+    [[nodiscard]] uint8_t peek_highest_priority() const noexcept;
     [[nodiscard]] bool is_empty() const noexcept { return ready_bitmask_ == 0; }
 };
 
@@ -45,33 +44,22 @@ public:
 
 namespace acrtos {
 
-/**
- * @class Scheduler
- * @brief The central brain of the RTOS (Singleton).
- * @details Manages all task allocations, context switching, and timing. 
- *          Tasks are statically allocated in an internal memory pool to 
- *          avoid dynamic memory fragmentation.
- */
-class Scheduler { 
+class Scheduler {
 private:
     Scheduler() = default;
 
     internal::TaskControlBlock* allocate_tcb() noexcept;
-
     void add_to_ready_queue(internal::TaskControlBlock* tcb) noexcept;
-    
+    [[nodiscard]] bool needs_preemption() const noexcept;
+
     internal::TaskControlBlock task_table_[config::kMaxTasks];
     internal::TaskControlBlock* current_task_{nullptr};
     internal::ReadyManager ready_mgr_;
     internal::DelayList delay_list_;
     uint8_t task_count_{0};
     bool started_{false};
-    
+
 public:
-    /**
-     * @brief Retrieves the singleton instance of the Scheduler.
-     * @return Reference to the Scheduler.
-     */
     static Scheduler& instance() noexcept {
         static Scheduler instance;
         return instance;
@@ -83,19 +71,26 @@ public:
     template <typename F>
     requires std::invocable<F>
     Task create_task(F&& callable, uint8_t priority = 1) noexcept {
+        ACRTOS_ASSERT(priority < config::kMaxPriorities && "priority must be 0 .. kMaxPriorities-1");
+        if (priority >= config::kMaxPriorities) {
+            return Task{nullptr};
+        }
+
         internal::TaskControlBlock* tcb = allocate_tcb();
-        if (!tcb) return Task{nullptr};
+        if (!tcb) {
+            return Task{nullptr};
+        }
 
         using DecayedF = std::decay_t<F>;
 
-        static_assert(sizeof(DecayedF) < (config::kStackSize * sizeof(uint32_t)) / 2,
-                      "Callable object is too large for the task stack!");
+        static_assert(sizeof(DecayedF) < (config::kStackSize * sizeof(uint32_t)) / 2, "Callable is too large for the task stack");
 
-        uint8_t* stack_end = reinterpret_cast<uint8_t*>(&tcb->stack[config::kStackSize]);
+        uint8_t* stack_end =
+            reinterpret_cast<uint8_t*>(&tcb->stack[config::kStackSize]);
 
         stack_end -= sizeof(DecayedF);
-
-        std::size_t align_offset = reinterpret_cast<std::uintptr_t>(stack_end) % 8;
+        const std::size_t align_offset =
+            reinterpret_cast<std::uintptr_t>(stack_end) % 8;
         stack_end -= align_offset;
 
         DecayedF* stored_callable = new (stack_end) DecayedF(std::forward<F>(callable));
@@ -104,28 +99,29 @@ public:
         auto trampoline = [](void* ctx) {
             auto* fn = static_cast<DecayedF*>(ctx);
             (*fn)();
+            fn->~DecayedF();
 
             Scheduler::instance().suspend_task(Scheduler::instance().get_current_task());
-            while(true) { asm volatile("wfi"); }
+            while (true) {
+                asm volatile("wfi");
+            }
         };
 
         tcb->sp = internal::init_task_stack(hw_stack_top, trampoline, stored_callable);
         tcb->priority = priority;
 
         add_to_ready_queue(tcb);
+
+        if (started_ && current_task_ != nullptr &&
+            tcb->priority > current_task_->priority) {
+            task_yield();
+        }
+
         return Task(tcb);
     }
 
-    /**
-     * @brief Starts the RTOS scheduler and hardware timers.
-     * @warning This function never returns.
-     */
-    void start() noexcept;
+    [[noreturn]] void start() noexcept;
 
-    /**
-     * @brief Blocks the currently running task for a specified duration.
-     * @param ms The number of milliseconds to sleep.
-     */
     void delay_ms(TickType ms) noexcept;
     void tick() noexcept;
 

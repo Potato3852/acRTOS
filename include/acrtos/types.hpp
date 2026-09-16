@@ -1,27 +1,31 @@
 /**
  * @file types.hpp
- * @brief Core data types and enumerations for the RTOS.
+ * @brief Core data types for the kernel.
  */
-
 #pragma once
 #include <cstdint>
-#include <cstddef>
 #include "acRtosConfig.hpp"
 
 namespace acrtos {
 
-/** @brief Represents time durations and timestamps within the kernel. */
-using TickType = uint32_t;
+/** @brief Kernel time: both timestamps and delay lengths in ticks. */
+using TickType = std::uint32_t;
 
 /**
- * @enum TaskState
- * @brief Represents the current lifecycle state of a task.
+ * Convert a millisecond delay to tick count.
+ * delay_ms(0) stays 0; any positive delay is at least one tick.
  */
-enum class TaskState : uint8_t {
-    Ready,      /**< Task is ready to run and waiting in the ReadyManager. */
-    Running,    /**< Task is currently executing on the CPU. */
-    Blocked,    /**< Task is sleeping (e.g., in DelayList) waiting for a timeout. */
-    Suspended   /**< Task is paused indefinitely until explicitly resumed. */
+[[nodiscard]] constexpr TickType ms_to_ticks(TickType ms) noexcept {
+    if (ms == 0) return 0;
+    const TickType ticks = ms / config::kTickRateMs;
+    return ticks == 0 ? TickType{1} : ticks;
+}
+
+enum class TaskState : std::uint8_t {
+    Ready,
+    Running,
+    Blocked,
+    Suspended
 };
 
 } // namespace acrtos

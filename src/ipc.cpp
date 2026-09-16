@@ -1,12 +1,14 @@
-#include "ipc.hpp"
-#include "scheduler.hpp"
-#include "port.hpp"
+#include "acrtos/ipc.hpp"
+#include "acrtos/scheduler.hpp"
+#include "acrtos/port.hpp"
+
+#include <cstdint>
 
 namespace acrtos::internal {
 
 void WaitQueue::park(TaskControlBlock* task) noexcept {
-    ACRTOS_ASSERT(task != nullptr && "WaitQueue::park(nullptr)");
-    ACRTOS_ASSERT(task->wait_list == nullptr && "Task already parked on a wait list");
+    ACRTOS_ASSERT(task != nullptr);
+    ACRTOS_ASSERT(task->wait_list == nullptr && "task already parked on a wait list");
 
     task->state = TaskState::Blocked;
     task->wait_list = &wait_list_;
@@ -55,12 +57,11 @@ bool Semaphore::try_take() noexcept {
 }
 
 void Semaphore::give() noexcept {
-    internal::TaskControlBlock* woken = nullptr;
     bool should_preempt = false;
 
     {
         port::CriticalSection guard;
-        woken = wait_.wake_highest();
+        internal::TaskControlBlock* woken = wait_.wake_highest();
         if (woken != nullptr) {
             should_preempt = Scheduler::instance().make_task_ready(woken);
         } else if (count_ < UINT32_MAX) {
