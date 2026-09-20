@@ -10,6 +10,7 @@ extern "C" {
         auto* prev_task = sched.get_current_task();
 
         if (prev_task != nullptr) {
+            ACRTOS_ASSERT(prev_task->stack[0] == acrtos::kStackCanary && "stack overflow");
             prev_task->sp = current_sp;
             if (prev_task->state == acrtos::TaskState::Running) {
                 prev_task->state = acrtos::TaskState::Ready;
@@ -98,28 +99,24 @@ void Scheduler::tick() noexcept {
     ACRTOS_ASSERT(!started_ && "Scheduler::start() called twice");
     if (started_) {
         while (true) {
-            asm volatile("wfi");
+            port::wait_for_interrupt();
         }
     }
 
-    create_task([]() {
-        while (true) {
-            asm volatile("wfi");
-        }
-    }, 0);
+    auto idle = create_task([]() { while (true) port::wait_for_interrupt(); }, 0);
+    ACRTOS_ASSERT(idle.is_valid() && "kMaxTasks too small: no slot for idle");
 
     started_ = true;
     port::start_hardware_and_yield();
 }
 
 void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
-    if (!task || task->state == TaskState::Suspended) {
-        return;
-    }
+    if (!task)return;
 
     bool yield_self = false;
     {
         port::CriticalSection guard;
+        if (task->state == TaskState::Suspended) return;
 
         if (task->state == TaskState::Ready) {
             ready_mgr_.remove(task);
@@ -127,9 +124,9 @@ void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
             if (task->wait_list != nullptr) {
                 task->wait_list->remove(task);
                 task->wait_list = nullptr;
-            } else {
-                delay_list_.remove(task);
+                task->timeout_expired = true;
             }
+            delay_list_.remove(task);
         }
 
         yield_self = (task == current_task_) && started_;
@@ -150,27 +147,46 @@ bool Scheduler::make_task_ready(internal::TaskControlBlock* task) noexcept {
     task->wait_list = nullptr;
     ready_mgr_.add(task);
 
-    return started_ && current_task_ != nullptr &&
-           task->priority > current_task_->priority;
+    return started_ && current_task_ != nullptr && task->priority > current_task_->priority;
 }
 
 void Scheduler::resume_task(internal::TaskControlBlock* task) noexcept {
-    if (!task || task->state != TaskState::Suspended) {
-        return;
-    }
+    if (!task) return;
 
     bool should_preempt = false;
     {
         port::CriticalSection guard;
+        if (task->state != TaskState::Suspended) return;
         task->state = TaskState::Ready;
         ready_mgr_.add(task);
-        should_preempt = started_ && current_task_ != nullptr &&
-                         task->priority > current_task_->priority;
+        should_preempt = started_ && current_task_ != nullptr && task->priority > current_task_->priority;
     }
+    if (should_preempt) task_yield();
+}
 
-    if (should_preempt) {
-        task_yield();
+void Scheduler::set_task_priority(internal::TaskControlBlock* task, uint8_t priority) noexcept {
+    ACRTOS_ASSERT(task != nullptr && priority < config::kMaxPriorities);
+    port::CriticalSection guard;
+
+    if (task->priority == priority) return;
+
+    if (task->state == TaskState::Ready) {
+        ready_mgr_.remove(task);
+        task->priority = priority;
+        ready_mgr_.add(task);
+    } else {
+        task->priority = priority;
+        if (task->state == TaskState::Blocked && task->wait_list != nullptr) {
+            task->wait_list->remove(task);
+            task->wait_list->insert_by_priority(task);
+        }
     }
+}
+
+void Scheduler::cancel_timeout(internal::TaskControlBlock* task) noexcept {
+    if (task == nullptr) return;
+    port::CriticalSection guard;
+    delay_list_.remove(task);
 }
 
 } // namespace acrtos

@@ -19,9 +19,16 @@ struct TaskControlBlock {
     uint32_t stack[config::kStackSize]{0};
 
     uint8_t priority{0};
+    uint8_t base_priority{0};
+
     TaskControlBlock* prev{nullptr};
     TaskControlBlock* next{nullptr};
+    TaskControlBlock* delay_prev{nullptr};
+    TaskControlBlock* delay_next{nullptr};
+
     TaskList* wait_list{nullptr};
+    bool in_delay_list{false};
+    bool timeout_expired{false};
 };
 
 class TaskList {

@@ -43,9 +43,36 @@ public:
     Semaphore(const Semaphore&) = delete;
     Semaphore& operator=(const Semaphore&) = delete;
 
-    void take() noexcept;
+    [[nodiscard]] bool take(TickType timeout_ms = kWaitForever) noexcept;
     [[nodiscard]] bool try_take() noexcept;
     void give() noexcept;
+
+    [[nodiscard]] bool try_take_from_isr() noexcept;
+    [[nodiscard]] bool give_from_isr() noexcept;
+};
+
+class Mutex {
+private:
+    internal::WaitQueue wait_;
+    internal::TaskControlBlock* owner_{nullptr};
+
+public:
+    [[nodiscard]]bool lock() noexcept;
+    [[nodiscard]]bool unlock() noexcept;
+};
+
+class LockGuard {
+private:
+    Mutex& m_;
+public:
+    explicit LockGuard(Mutex& m) noexcept : m_(m) {
+        [[maybe_unused]] const bool ok = m_.lock();
+        ACRTOS_ASSERT(ok);
+    }
+    ~LockGuard() noexcept { (void)m_.unlock(); }
+
+    LockGuard(const LockGuard&) = delete;
+    LockGuard& operator=(const LockGuard&) = delete;
 };
 
 } // namespace acrtos

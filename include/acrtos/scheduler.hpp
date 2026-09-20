@@ -82,15 +82,13 @@ public:
         }
 
         using DecayedF = std::decay_t<F>;
-
         static_assert(sizeof(DecayedF) < (config::kStackSize * sizeof(uint32_t)) / 2, "Callable is too large for the task stack");
+        static_assert(alignof(DecayedF) <= 8, "Callable alignment too strict for task stack");
 
-        uint8_t* stack_end =
-            reinterpret_cast<uint8_t*>(&tcb->stack[config::kStackSize]);
+        uint8_t* stack_end = reinterpret_cast<uint8_t*>(&tcb->stack[config::kStackSize]);
 
         stack_end -= sizeof(DecayedF);
-        const std::size_t align_offset =
-            reinterpret_cast<std::uintptr_t>(stack_end) % 8;
+        const std::size_t align_offset = reinterpret_cast<std::uintptr_t>(stack_end) % 8;
         stack_end -= align_offset;
 
         DecayedF* stored_callable = new (stack_end) DecayedF(std::forward<F>(callable));
@@ -103,12 +101,14 @@ public:
 
             Scheduler::instance().suspend_task(Scheduler::instance().get_current_task());
             while (true) {
-                asm volatile("wfi");
+                port::wait_for_interrupt();
             }
         };
 
         tcb->sp = internal::init_task_stack(hw_stack_top, trampoline, stored_callable);
         tcb->priority = priority;
+        tcb->base_priority = priority;
+        tcb->stack[0] = kStackCanary;
 
         add_to_ready_queue(tcb);
 
@@ -137,6 +137,9 @@ public:
      * @return true if the woken task should preempt the current one.
      */
     bool make_task_ready(internal::TaskControlBlock* task) noexcept;
+    void start_timeout_for_current_task(TickType ticks) noexcept { delay_list_.insert(current_task_, ticks); }
+    void set_task_priority(internal::TaskControlBlock* task, uint8_t priority) noexcept;
+    void cancel_timeout(internal::TaskControlBlock* task) noexcept;
 };
 
 } // namespace acrtos

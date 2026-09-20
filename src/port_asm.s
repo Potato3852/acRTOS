@@ -29,9 +29,7 @@ PendSV_Handler:
     str r0, [r1]
 
 skip_save:
-    push {lr}
     bl schedule_next_task
-    pop {lr}
 
     ldr r0, =current_sp
     ldr r0, [r0]
@@ -55,4 +53,5 @@ task_yield:
     ldr r1, =0x10000000       @ PENDSVSET
     str r1, [r0]
     dsb
+    isb
     bx lr

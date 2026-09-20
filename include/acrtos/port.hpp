@@ -25,7 +25,6 @@ namespace acrtos::internal {
 namespace acrtos::port {
 
 #if defined(__arm__)
-
 inline uint32_t enter_critical() noexcept {
     uint32_t primask;
     asm volatile(
@@ -45,6 +44,20 @@ inline void exit_critical(uint32_t primask) noexcept {
 #else
 inline uint32_t enter_critical() noexcept { return 0; }
 inline void exit_critical(uint32_t) noexcept {}
+#endif
+
+#if defined(__arm__)
+inline bool in_isr() noexcept {
+    uint32_t ipsr;
+    asm volatile("mrs %0, ipsr" : "=r"(ipsr));
+    return ipsr != 0;
+}
+[[noreturn]] inline void wait_for_interrupt() noexcept {
+    while (true) asm volatile("wfi");
+}
+#else
+inline bool in_isr() noexcept { return false; }
+[[noreturn]] inline void wait_for_interrupt() noexcept { while (true) {} }
 #endif
 
 /**

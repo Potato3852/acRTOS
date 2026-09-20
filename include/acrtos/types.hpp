@@ -10,6 +10,10 @@ namespace acrtos {
 
 /** @brief Kernel time: both timestamps and delay lengths in ticks. */
 using TickType = std::uint32_t;
+inline constexpr TickType kWaitForever = 0xFFFFFFFF;
+
+/** @brief Kernel base canary code */
+inline constexpr std::uint32_t kStackCanary = 0xDEADBEEF;
 
 /**
  * Convert a millisecond delay to tick count.
@@ -17,8 +21,7 @@ using TickType = std::uint32_t;
  */
 [[nodiscard]] constexpr TickType ms_to_ticks(TickType ms) noexcept {
     if (ms == 0) return 0;
-    const TickType ticks = ms / config::kTickRateMs;
-    return ticks == 0 ? TickType{1} : ticks;
+    return ms / config::kTickRateMs + (ms % config::kTickRateMs != 0 ? 1u : 0u);
 }
 
 enum class TaskState : std::uint8_t {

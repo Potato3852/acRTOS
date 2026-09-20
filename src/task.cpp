@@ -102,85 +102,74 @@ void TaskList::remove(TaskControlBlock* task) {
 
 void DelayList::insert(TaskControlBlock* task, TickType ticks) noexcept {
     ACRTOS_ASSERT(task != nullptr);
+    ACRTOS_ASSERT(!task->in_delay_list);
 
-    if (head == nullptr) {
-        task->delay_ticks = ticks;
-        task->next = nullptr;
-        task->prev = nullptr;
-        head = task;
-        return;
-    }
-
-    auto current = head;
     TaskControlBlock* prev = nullptr;
+    TaskControlBlock* current = head;
 
-    while (current != nullptr) {
-        if (ticks >= current->delay_ticks) {
-            ticks -= current->delay_ticks;
-            prev = current;
-            current = current->next;
-        } else {
-            break;
-        }
+    while (current != nullptr && ticks >= current->delay_ticks) {
+        ticks -= current->delay_ticks;
+        prev = current;
+        current = current->delay_next;
     }
 
     task->delay_ticks = ticks;
-    task->next = current;
-    task->prev = prev;
+    task->delay_prev = prev;
+    task->delay_next = current;
 
-    if (prev != nullptr) {
-        prev->next = task;
-    } else {
-        head = task;
-    }
-
+    if (prev != nullptr) prev->delay_next = task; else head = task;
     if (current != nullptr) {
-        current->prev = task;
+        current->delay_prev = task;
         current->delay_ticks -= ticks;
     }
+    task->in_delay_list = true;
 }
 
 void DelayList::remove(TaskControlBlock* task) noexcept {
-    if (!task || !head) {
+    if (task == nullptr || !task->in_delay_list) {
         return;
     }
 
-    if (task->next != nullptr) {
-        task->next->delay_ticks += task->delay_ticks;
-        task->next->prev = task->prev;
+    if (task->delay_next != nullptr) {
+        task->delay_next->delay_ticks += task->delay_ticks;
+        task->delay_next->delay_prev = task->delay_prev;
+    }
+    if (task->delay_prev != nullptr) {
+        task->delay_prev->delay_next = task->delay_next;
+    } else {
+        head = task->delay_next;
     }
 
-    if (task == head) {
-        head = task->next;
-    } else if (task->prev != nullptr) {
-        task->prev->next = task->next;
-    }
-
-    task->next = nullptr;
-    task->prev = nullptr;
+    task->delay_next = nullptr;
+    task->delay_prev = nullptr;
     task->delay_ticks = 0;
+    task->in_delay_list = false;
 }
 
 void DelayList::tick(ReadyManager& ready_mgr) noexcept {
-    if (head == nullptr) {
-        return;
-    }
+    if (head == nullptr) return;
 
     if (head->delay_ticks > 0) {
         head->delay_ticks -= 1;
     }
 
     while (head != nullptr && head->delay_ticks == 0) {
-        auto temp = head;
-        head = head->next;
-        if (head != nullptr) {
-            head->prev = nullptr;
-        }
-        temp->next = nullptr;
-        temp->prev = nullptr;
+        TaskControlBlock* t = head;
+        head = t->delay_next;
+        if (head != nullptr) head->delay_prev = nullptr;
 
-        temp->state = TaskState::Ready;
-        ready_mgr.add(temp);
+        t->delay_next = nullptr;
+        t->delay_prev = nullptr;
+        t->in_delay_list = false;
+
+        if (t->wait_list != nullptr) {
+            t->wait_list->remove(t);
+            t->wait_list = nullptr;
+            t->timeout_expired = true;
+        }
+
+        t->state = TaskState::Ready;
+        ready_mgr.add(t);
     }
 }
 
