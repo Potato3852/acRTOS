@@ -29,6 +29,7 @@ struct TaskControlBlock {
     TaskList* wait_list{nullptr};
     bool in_delay_list{false};
     bool timeout_expired{false};
+    void* xfer_ptr{nullptr};
 };
 
 class TaskList {

@@ -12,7 +12,7 @@
 namespace acrtos::config {
 
 /** @brief Maximum number of tasks, including the idle task created in start(). */
-inline constexpr std::size_t kMaxTasks = 4;
+inline constexpr std::size_t kMaxTasks = 20;
 
 /** @brief Default task stack size in 32-bit words (256 words = 1024 bytes). */
 inline constexpr std::size_t kStackSize = 256;

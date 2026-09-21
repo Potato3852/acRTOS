@@ -77,6 +77,7 @@ public:
         }
 
         internal::TaskControlBlock* tcb = allocate_tcb();
+        ACRTOS_ASSERT(tcb != nullptr && "kMaxTasks too small");
         if (!tcb) {
             return Task{nullptr};
         }
