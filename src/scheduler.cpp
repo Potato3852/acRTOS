@@ -10,7 +10,7 @@ extern "C" {
         auto* prev_task = sched.get_current_task();
 
         if (prev_task != nullptr) {
-            ACRTOS_ASSERT(prev_task->stack[0] == acrtos::kStackCanary && "stack overflow");
+            ACRTOS_ASSERT(prev_task->stack_base[0] == acrtos::kStackCanary && "stack overflow");
             prev_task->sp = current_sp;
             if (prev_task->state == acrtos::TaskState::Running) {
                 prev_task->state = acrtos::TaskState::Ready;
@@ -49,10 +49,62 @@ internal::TaskControlBlock* Scheduler::allocate_tcb() noexcept {
     return &tcb;
 }
 
+internal::TaskControlBlock* Scheduler::create_task_impl(uint32_t* stack_buf, std::size_t stack_words, TrampolineFn trampoline, void* callable_ptr,uint8_t priority) noexcept {
+    ACRTOS_ASSERT(priority < config::kMaxPriorities && "priority must be 0 .. kMaxPriorities-1");
+    if (priority >= config::kMaxPriorities) return nullptr;
+
+    internal::TaskControlBlock* tcb = allocate_tcb();
+    ACRTOS_ASSERT(tcb != nullptr && "kMaxTasks too small");
+    if (!tcb) return nullptr;
+
+    tcb->stack_base = stack_buf;
+    tcb->stack_end  = stack_buf + stack_words;
+    tcb->stack_base[0] = kStackCanary;
+
+    uint32_t* hw_stack_top = reinterpret_cast<uint32_t*>(callable_ptr);
+
+    tcb->sp = internal::init_task_stack(hw_stack_top, trampoline, callable_ptr);
+    tcb->priority = priority;
+    tcb->base_priority = priority;
+
+    add_to_ready_queue(tcb);
+
+    if (started_ && current_task_ != nullptr && tcb->priority > current_task_->priority) {
+        task_yield();
+    }
+
+    return tcb;
+}
+
 void Scheduler::add_to_ready_queue(internal::TaskControlBlock* tcb) noexcept {
     port::CriticalSection guard;
     tcb->state = TaskState::Ready;
     ready_mgr_.add(tcb);
+}
+
+TickType Scheduler::get_tick_count() const noexcept {
+    // if TickType will be 64 bit
+    port::CriticalSection guard;
+    return tick_count_;
+}
+
+void Scheduler::delay_until(TickType wake_time) noexcept {
+    if (current_task_ == nullptr) {
+        return;
+    }
+
+    const std::int32_t remaining = static_cast<std::int32_t>(wake_time - get_tick_count());
+    if (remaining <= 0) {
+        return;
+    } 
+
+    {
+        port::CriticalSection guard;
+        current_task_->state = TaskState::Blocked;
+        delay_list_.insert(current_task_, static_cast<TickType>(remaining));
+    }
+
+    task_yield();
 }
 
 void Scheduler::delay_ms(TickType ms) noexcept {
@@ -86,6 +138,7 @@ void Scheduler::tick() noexcept {
     bool need_switch = false;
     {
         port::CriticalSection guard;
+        tick_count_++;
         delay_list_.tick(ready_mgr_);
         need_switch = needs_preemption();
     }
@@ -111,7 +164,7 @@ void Scheduler::tick() noexcept {
 }
 
 void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
-    if (!task)return;
+    if (!task || task->state == TaskState::Deleted) return;
 
     bool yield_self = false;
     {
@@ -139,7 +192,7 @@ void Scheduler::suspend_task(internal::TaskControlBlock* task) noexcept {
 }
 
 bool Scheduler::make_task_ready(internal::TaskControlBlock* task) noexcept {
-    if (!task) {
+    if (!task || task->state == TaskState::Deleted) {
         return false;
     }
 
@@ -152,6 +205,7 @@ bool Scheduler::make_task_ready(internal::TaskControlBlock* task) noexcept {
 
 void Scheduler::resume_task(internal::TaskControlBlock* task) noexcept {
     if (!task) return;
+    ACRTOS_ASSERT(!task->in_delay_list && "resuming a task that is still in delay list");
 
     bool should_preempt = false;
     {
@@ -162,6 +216,37 @@ void Scheduler::resume_task(internal::TaskControlBlock* task) noexcept {
         should_preempt = started_ && current_task_ != nullptr && task->priority > current_task_->priority;
     }
     if (should_preempt) task_yield();
+}
+
+void Scheduler::delete_task(internal::TaskControlBlock* task) noexcept {
+    if (!task || task->state == TaskState::Deleted) return;
+
+    bool yield_self = false;
+    {
+        port::CriticalSection guard;
+
+        // Clean task`s traces.
+        if (task->state == TaskState::Ready) {
+            ready_mgr_.remove(task);
+        }
+        
+        if (task->state == TaskState::Blocked) {
+            if (task->wait_list != nullptr) {
+                task->wait_list->remove(task);
+                task->wait_list = nullptr;
+                task->timeout_expired = true;
+            }
+            delay_list_.remove(task);
+        }
+
+        yield_self = (task == current_task_) && started_;
+        task->state = TaskState::Deleted;
+        //** We are not clean up task memory, only make it invisible for others objects */
+    }
+
+    if (yield_self) {
+        task_yield();
+    }
 }
 
 void Scheduler::set_task_priority(internal::TaskControlBlock* task, uint8_t priority) noexcept {

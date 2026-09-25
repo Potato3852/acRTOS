@@ -48,16 +48,21 @@ class Scheduler {
 private:
     Scheduler() = default;
 
+    using TrampolineFn = void(*)(void*);
     internal::TaskControlBlock* allocate_tcb() noexcept;
+    internal::TaskControlBlock* create_task_impl(uint32_t* stack_buf, std::size_t stack_words, TrampolineFn trampoline,void* callable_ptr,uint8_t priority) noexcept;
+
     void add_to_ready_queue(internal::TaskControlBlock* tcb) noexcept;
     [[nodiscard]] bool needs_preemption() const noexcept;
 
     internal::TaskControlBlock task_table_[config::kMaxTasks];
+
     internal::TaskControlBlock* current_task_{nullptr};
     internal::ReadyManager ready_mgr_;
     internal::DelayList delay_list_;
     uint8_t task_count_{0};
     bool started_{false};
+    volatile TickType tick_count_{0};
 
 public:
     static Scheduler& instance() noexcept {
@@ -68,32 +73,28 @@ public:
     Scheduler(const Scheduler&) = delete;
     Scheduler& operator=(const Scheduler&) = delete;
 
-    template <typename F>
+    template <std::size_t StackWords = config::kStackSize, auto Tag = []{}, typename F>
     requires std::invocable<F>
     Task create_task(F&& callable, uint8_t priority = 1) noexcept {
-        ACRTOS_ASSERT(priority < config::kMaxPriorities && "priority must be 0 .. kMaxPriorities-1");
-        if (priority >= config::kMaxPriorities) {
-            return Task{nullptr};
-        }
+        static_assert(StackWords >= 64, "stack too small to be useful");
+        static_assert((StackWords * sizeof(uint32_t)) % 8 == 0, "must be 8-byte aligned");
 
-        internal::TaskControlBlock* tcb = allocate_tcb();
-        ACRTOS_ASSERT(tcb != nullptr && "kMaxTasks too small");
-        if (!tcb) {
-            return Task{nullptr};
-        }
+        static bool is_created = false;
+        ACRTOS_ASSERT(!is_created && "create_task called multiple times at the same call-site (e.g. inside a loop)");
+        is_created = true;
+        
+        alignas(8) static uint32_t storage[StackWords];
 
         using DecayedF = std::decay_t<F>;
-        static_assert(sizeof(DecayedF) < (config::kStackSize * sizeof(uint32_t)) / 2, "Callable is too large for the task stack");
+        static_assert(sizeof(DecayedF) < (StackWords * sizeof(uint32_t)) / 2, "Callable is too large for the task stack");
         static_assert(alignof(DecayedF) <= 8, "Callable alignment too strict for task stack");
 
-        uint8_t* stack_end = reinterpret_cast<uint8_t*>(&tcb->stack[config::kStackSize]);
+        uint8_t* stack_bytes = reinterpret_cast<uint8_t*>(storage + StackWords);
+        stack_bytes -= sizeof(DecayedF);
+        const std::size_t align_offset = reinterpret_cast<std::uintptr_t>(stack_bytes) % 8;
+        stack_bytes -= align_offset;
 
-        stack_end -= sizeof(DecayedF);
-        const std::size_t align_offset = reinterpret_cast<std::uintptr_t>(stack_end) % 8;
-        stack_end -= align_offset;
-
-        DecayedF* stored_callable = new (stack_end) DecayedF(std::forward<F>(callable));
-        uint32_t* hw_stack_top = reinterpret_cast<uint32_t*>(stack_end);
+        DecayedF* stored_callable = new (stack_bytes) DecayedF(std::forward<F>(callable));
 
         auto trampoline = [](void* ctx) {
             auto* fn = static_cast<DecayedF*>(ctx);
@@ -106,23 +107,15 @@ public:
             }
         };
 
-        tcb->sp = internal::init_task_stack(hw_stack_top, trampoline, stored_callable);
-        tcb->priority = priority;
-        tcb->base_priority = priority;
-        tcb->stack[0] = kStackCanary;
-
-        add_to_ready_queue(tcb);
-
-        if (started_ && current_task_ != nullptr &&
-            tcb->priority > current_task_->priority) {
-            task_yield();
-        }
+        auto* tcb = create_task_impl(storage, StackWords, trampoline, stored_callable, priority);
 
         return Task(tcb);
     }
 
     [[noreturn]] void start() noexcept;
 
+    [[nodiscard]] TickType get_tick_count() const noexcept;
+    void delay_until(TickType wake_time) noexcept;
     void delay_ms(TickType ms) noexcept;
     void tick() noexcept;
 
@@ -132,6 +125,7 @@ public:
 
     void suspend_task(internal::TaskControlBlock* task) noexcept;
     void resume_task(internal::TaskControlBlock* task) noexcept;
+    void delete_task(internal::TaskControlBlock* task) noexcept;
 
     /**
      * @brief Move a waiting task into the ready lists. Does not yield.

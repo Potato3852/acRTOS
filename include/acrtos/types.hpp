@@ -28,7 +28,8 @@ enum class TaskState : std::uint8_t {
     Ready,
     Running,
     Blocked,
-    Suspended
+    Suspended,
+    Deleted
 };
 
 } // namespace acrtos

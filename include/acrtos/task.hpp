@@ -16,7 +16,10 @@ struct TaskControlBlock {
     uint32_t* sp{nullptr};
     TaskState state{TaskState::Ready};
     TickType delay_ticks{0};
-    uint32_t stack[config::kStackSize]{0};
+
+    // Task`s stack fields
+    uint32_t* stack_base{nullptr};
+    uint32_t* stack_end{nullptr};
 
     uint8_t priority{0};
     uint8_t base_priority{0};
@@ -89,6 +92,7 @@ public:
 
     void suspend() noexcept;
     void resume() noexcept;
+    void terminate() noexcept;
 
     [[nodiscard]] TaskState get_state() const noexcept { return tcb_ ? tcb_->state : TaskState::Suspended; }
     [[nodiscard]] uint8_t get_priority() const noexcept { return tcb_ ? tcb_->priority : 0; }

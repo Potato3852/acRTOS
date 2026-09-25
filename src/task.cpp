@@ -15,6 +15,12 @@ void Task::resume() noexcept {
     }
 }
 
+void Task::terminate() noexcept {
+    if (tcb_) {
+        Scheduler::instance().delete_task(tcb_);
+    }
+}
+
 namespace internal {
 
 void TaskList::push_back(TaskControlBlock* task) {
