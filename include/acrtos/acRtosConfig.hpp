@@ -15,7 +15,7 @@ namespace acrtos::config {
 inline constexpr std::size_t kMaxTasks = 15;
 
 /** @brief Default task stack size in 32-bit words (256 words = 1024 bytes). */
-inline constexpr std::size_t kStackSize = 256;
+inline constexpr std::size_t kStackSize = 512;
 
 /** @brief Priority levels 0 .. kMaxPriorities-1. Higher number = more urgent. */
 inline constexpr std::size_t kMaxPriorities = 32;

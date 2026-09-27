@@ -138,7 +138,7 @@ void Scheduler::tick() noexcept {
     bool need_switch = false;
     {
         port::CriticalSection guard;
-        tick_count_++;
+        tick_count_ += 1;
         delay_list_.tick(ready_mgr_);
         need_switch = needs_preemption();
     }

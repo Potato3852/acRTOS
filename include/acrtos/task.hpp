@@ -33,6 +33,10 @@ struct TaskControlBlock {
     bool in_delay_list{false};
     bool timeout_expired{false};
     void* xfer_ptr{nullptr};
+
+    uint32_t event_wait_mask{0};
+    bool event_wait_all{false};
+    bool event_clear_on_exit{false};
 };
 
 class TaskList {
@@ -55,6 +59,7 @@ public:
     TaskControlBlock* pop_front();
     void remove(TaskControlBlock* task);
     [[nodiscard]] bool is_empty() const { return head == nullptr; }
+    [[nodiscard]] TaskControlBlock* peek_front() const {return head; }
 };
 
 /**

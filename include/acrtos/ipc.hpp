@@ -75,4 +75,30 @@ public:
     LockGuard& operator=(const LockGuard&) = delete;
 };
 
+class EventGroup {
+private:
+    uint32_t current_bits_{0};
+    internal::TaskList waiters_;
+
+    [[nodiscard]] static bool bits_satisfy(uint32_t bits, uint32_t mask, bool wait_all) noexcept {
+        return wait_all ? (bits & mask) == mask : (bits & mask) != 0;
+    }
+    [[nodiscard]] static bool condition_met(const internal::TaskControlBlock* t, uint32_t bits) noexcept {
+        return t->event_wait_all ? (bits & t->event_wait_mask) == t->event_wait_mask
+                                 : (bits & t->event_wait_mask) != 0;
+    }
+    [[nodiscard]] bool scan_and_wake_locked() noexcept;
+
+public:
+    [[nodiscard]] uint32_t wait_bits(uint32_t mask, bool wait_all, 
+                                     bool clear_on_exit, 
+                                     TickType timeout_ms = kWaitForever) noexcept;
+
+    uint32_t set_bits(uint32_t mask) noexcept;
+    uint32_t clear_bits(uint32_t mask) noexcept;
+    [[nodiscard]] uint32_t get_bits() const noexcept;
+    uint32_t set_bits_from_isr(uint32_t mask, bool& should_yield) noexcept;
+
+};
+
 } // namespace acrtos

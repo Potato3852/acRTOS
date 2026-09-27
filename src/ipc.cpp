@@ -167,4 +167,122 @@ bool Mutex::unlock() noexcept {
     return true;
 }
 
+bool EventGroup::scan_and_wake_locked() noexcept {
+    bool should_yield = false;
+    internal::TaskControlBlock* cur = waiters_.peek_front();
+
+    while (cur != nullptr) {
+        internal::TaskControlBlock* next = cur->next;
+
+        if (condition_met(cur, current_bits_)) {
+            waiters_.remove(cur);
+            Scheduler::instance().cancel_timeout(cur);
+
+            const uint32_t satisfied_bits = current_bits_;
+
+            if (cur->event_clear_on_exit) {
+                current_bits_ &= ~cur->event_wait_mask;
+            }
+            if (cur->xfer_ptr != nullptr) {
+                *static_cast<uint32_t*>(cur->xfer_ptr) = satisfied_bits;
+            }
+
+            should_yield |= Scheduler::instance().make_task_ready(cur);
+        }
+
+        cur = next;
+    }
+    return should_yield;
+}
+
+[[nodiscard]] uint32_t EventGroup::wait_bits(uint32_t mask, bool wait_all, bool clear_on_exit, TickType timeout_ms) noexcept {
+    if (mask == 0) return get_bits();
+
+    uint32_t return_bits = 0;
+    auto* current_task = Scheduler::instance().get_current_task();
+    ACRTOS_ASSERT(current_task != nullptr && "wait_bits() before Scheduler::start()");
+    ACRTOS_ASSERT(!port::in_isr() && "blocking wait_bits() from ISR");
+    if (current_task == nullptr) return current_bits_;
+
+    {
+        port::CriticalSection guard;
+
+        bool match = bits_satisfy(current_bits_, mask, wait_all);
+        
+        if (match) {
+            return_bits = current_bits_;
+            if (clear_on_exit) {
+                current_bits_ &= ~mask;
+            }
+            return return_bits;
+        }
+
+        if (timeout_ms == 0) { return current_bits_; }
+
+        current_task->event_wait_mask = mask;
+        current_task->event_wait_all = wait_all;
+        current_task->event_clear_on_exit = clear_on_exit;
+        current_task->xfer_ptr = &return_bits; 
+        current_task->timeout_expired = false;
+        
+        ACRTOS_ASSERT(current_task->wait_list == nullptr && "task already parked on a wait list");
+        current_task->state = TaskState::Blocked;
+        current_task->wait_list = &waiters_;
+        waiters_.insert_by_priority(current_task);
+
+        if (timeout_ms != kWaitForever) {
+            Scheduler::instance().start_timeout_for_current_task(ms_to_ticks(timeout_ms));
+        }
+    }
+
+    task_yield();
+
+    if (current_task->timeout_expired) {
+        port::CriticalSection guard;
+        return_bits = current_bits_;
+    }
+    return return_bits;
+}
+
+uint32_t EventGroup::set_bits(uint32_t mask) noexcept {
+    bool should_yield = false;
+    uint32_t return_bits = 0;
+
+    {
+        port::CriticalSection guard;
+        current_bits_ |= mask;
+        should_yield = scan_and_wake_locked();
+        return_bits = current_bits_;
+    }
+
+    if (should_yield) {
+        task_yield();
+    }
+
+    return return_bits;
+}
+
+uint32_t EventGroup::set_bits_from_isr(uint32_t mask, bool& should_yield) noexcept {
+    should_yield = false;
+    port::CriticalSection guard;
+    current_bits_ |= mask;
+    
+    if (scan_and_wake_locked()) {
+        should_yield = true;
+    }
+    
+    return current_bits_;
+}
+
+uint32_t EventGroup::clear_bits(uint32_t mask) noexcept {
+    port::CriticalSection guard;
+    current_bits_ &= ~mask;
+    return current_bits_;
+}
+
+uint32_t EventGroup::get_bits() const noexcept {
+    port::CriticalSection guard;
+    return current_bits_;
+}
+
 } // namespace acrtos
