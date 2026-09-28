@@ -3,8 +3,11 @@
 A small preemptive real-time kernel for Cortex-M4, written from scratch in C++20 as a
 learning project. No vendor HAL dependency in the kernel itself.
 
-<!-- TODO: one or two sentences on WHY you built this (learning embedded + modern C++),
-     it's the first thing anyone reads, make it personal -->
+I started this in January while getting into embedded development, to actually
+understand how an RTOS works under the hood — not just use one — and to see what C++20
+buys you over the C FreeRTOS is written in (concepts for `Queue<T, N>`'s item type, a
+`CriticalSection` RAII guard instead of manual enter/exit pairs, `Task` as a small
+value-type handle instead of a raw `TaskHandle_t`).
 
 ## Features
 
@@ -18,8 +21,6 @@ learning project. No vendor HAL dependency in the kernel itself.
 See [docs/architecture.md](docs/architecture.md) for how it fits together.
 
 ## Quick start
-
-<!-- TODO: minimal create_task + Scheduler::start() example, 10-15 lines -->
 
 ```cpp
 #include <acrtos.hpp>
@@ -40,8 +41,9 @@ int main() {
 
 ## Building
 
-<!-- TODO: link to docs/building.md, one line on the toolchain (arm-none-eabi-gcc, C++20) -->
-See [docs/building.md](docs/building.md).
+<!-- TODO: describe your toolchain / build steps here (e.g. IDE used, compiler,
+     required flags such as -std=c++20 -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16,
+     and how to run the on-target selftests from docs/testing.md). -->
 
 ## Documentation
 
@@ -56,9 +58,13 @@ See [docs/building.md](docs/building.md).
 
 ## Status
 
-<!-- TODO: honest one-liner, e.g. "Personal/educational project, not production-hardened.
-     Core scheduler, IPC primitives and queues are covered by on-target tests." -->
+Personal/educational project, not production-hardened. The scheduler, priority
+inheritance, queues and event groups are exercised by the on-target self-checking test
+suites in `tests/` (see [docs/testing.md](docs/testing.md)); `acrtos_time_selftest.cpp`
+is still a skeleton. Known gaps are listed honestly in
+[docs/limitations.md](docs/limitations.md) rather than hidden.
 
 ## License
 
-<!-- TODO: pick one (MIT is the usual default for this kind of project) -->
+All rights reserved. No license is currently granted for reuse; this is published for
+reading and learning purposes. Reach out if you'd like to use it for something.

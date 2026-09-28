@@ -15,7 +15,7 @@ namespace acrtos::config {
 inline constexpr std::size_t kMaxTasks = 15;
 
 /** @brief Default task stack size in 32-bit words (256 words = 1024 bytes). */
-inline constexpr std::size_t kStackSize = 512;
+inline constexpr std::size_t kStackSize = 256;
 
 /** @brief Priority levels 0 .. kMaxPriorities-1. Higher number = more urgent. */
 inline constexpr std::size_t kMaxPriorities = 32;
@@ -36,15 +36,26 @@ static_assert(kMaxTasks > 0, "Need at least one TCB slot (idle task).");
 static_assert((kStackSize * sizeof(std::uint32_t)) % 8 == 0, "Stack size in bytes must be 8-byte aligned (AAPCS).");
 static_assert(kTickRateMs > 0, "Tick period must be at least 1 ms.");
 static_assert(kCpuHz >= 1000, "CPU clock too low to derive a 1 ms SysTick.");
+static_assert(1000 % kTickRateMs == 0, "Tick period must divide 1000 ms.");
 
 } // namespace acrtos::config
 
+/**
+ * @def ACRTOS_USE_ASSERT
+ * @brief Set to 0 (e.g. `-DACRTOS_USE_ASSERT=0`) to compile all ACRTOS_ASSERT checks out.
+ */
 #ifndef ACRTOS_USE_ASSERT
 #define ACRTOS_USE_ASSERT 1
 #endif
 
+/**
+ * @brief Called when an ACRTOS_ASSERT fails.
+ * @details The default implementation (assert.cpp) is weak: it disables interrupts,
+ *          executes `bkpt #0` and spins. Provide a strong definition to override it.
+ */
 extern "C" void acrtos_assert_failed(const char* file, int line);
 
+/** @brief Kernel assertion. Expands to nothing when ACRTOS_USE_ASSERT is 0. */
 #if ACRTOS_USE_ASSERT
 #define ACRTOS_ASSERT(expr) \
     do { if (!(expr)) { acrtos_assert_failed(__FILE__, __LINE__); } } while (0)

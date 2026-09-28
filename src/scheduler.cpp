@@ -89,17 +89,12 @@ TickType Scheduler::get_tick_count() const noexcept {
 }
 
 void Scheduler::delay_until(TickType wake_time) noexcept {
-    if (current_task_ == nullptr) {
-        return;
-    }
+    if (current_task_ == nullptr) return;
 
-    const std::int32_t remaining = static_cast<std::int32_t>(wake_time - get_tick_count());
-    if (remaining <= 0) {
-        return;
-    } 
-
-    {
+    { 
         port::CriticalSection guard;
+        const std::int32_t remaining = static_cast<std::int32_t>(wake_time - get_tick_count());
+        if (remaining <= 0) return;
         current_task_->state = TaskState::Blocked;
         delay_list_.insert(current_task_, static_cast<TickType>(remaining));
     }
@@ -109,9 +104,7 @@ void Scheduler::delay_until(TickType wake_time) noexcept {
 
 void Scheduler::delay_ms(TickType ms) noexcept {
     const TickType ticks = ms_to_ticks(ms);
-    if (ticks == 0 || current_task_ == nullptr) {
-        return;
-    }
+    if (ticks == 0 || current_task_ == nullptr) return;
 
     {
         port::CriticalSection guard;

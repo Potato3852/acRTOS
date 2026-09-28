@@ -1,11 +1,14 @@
-ACRTOS_INCLUDES := -I$(ACRTOS_DIR)/include -I$(ACRTOS_DIR)/include/acrtos
+ACRTOS_ROOT := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
-ACRTOS_CXX_SOURCES := \
-	$(ACRTOS_DIR)/src/scheduler.cpp \
-	$(ACRTOS_DIR)/src/task.cpp \
-	$(ACRTOS_DIR)/src/ipc.cpp \
-	$(ACRTOS_DIR)/src/port_cm4.cpp \
-	$(ACRTOS_DIR)/src/assert.cpp
+ACRTOS_INCLUDES := -I$(ACRTOS_ROOT)/include -I$(ACRTOS_ROOT)/include/acrtos
+
+ACRTOS_SOURCES := \
+    $(ACRTOS_ROOT)/src/assert.cpp \
+    $(ACRTOS_ROOT)/src/ipc.cpp \
+    $(ACRTOS_ROOT)/src/port_cm4.cpp \
+    $(ACRTOS_ROOT)/src/queue.cpp \
+    $(ACRTOS_ROOT)/src/scheduler.cpp \
+    $(ACRTOS_ROOT)/src/task.cpp
 
 ACRTOS_ASM_SOURCES := \
-	$(ACRTOS_DIR)/src/port_asm.s
+    $(ACRTOS_ROOT)/src/port_asm.s

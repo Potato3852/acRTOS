@@ -108,6 +108,27 @@ bool Semaphore::give_from_isr() noexcept {
     return should_preempt;
 }
 
+void Mutex::add_held(internal::TaskControlBlock* t) noexcept {
+    next_held_ = t->held_mutexes;
+    t->held_mutexes = this;
+}
+
+void Mutex::remove_held(internal::TaskControlBlock* t) noexcept {
+    Mutex** pp = &t->held_mutexes;
+    while (*pp != nullptr && *pp != this) pp = &(*pp)->next_held_;
+    if (*pp != nullptr) *pp = next_held_;
+    next_held_ = nullptr;
+}
+
+uint8_t Mutex::recompute_priority(const internal::TaskControlBlock* t) noexcept {
+    uint8_t p = t->base_priority;
+    for (const Mutex* m = t->held_mutexes; m != nullptr; m = m->next_held_) {
+        const auto* w = m->wait_.peek_highest();
+        if (w != nullptr && w->priority > p) p = w->priority;
+    }
+    return p;
+}
+
 bool Mutex::lock() noexcept {
     ACRTOS_ASSERT(!port::in_isr() && "Mutex::lock() from ISR");
 
@@ -120,6 +141,7 @@ bool Mutex::lock() noexcept {
 
         if (owner_ == nullptr) {
             owner_ = current;
+            add_held(current);
             return true;
         }
         if (owner_ == current) {
@@ -150,16 +172,20 @@ bool Mutex::unlock() noexcept {
             return false;
         }
 
-        if (current->priority != current->base_priority) {
-            Scheduler::instance().set_task_priority(current, current->base_priority);
-            should_preempt = true;
-        }
+        remove_held(current);
 
         if (auto* next = wait_.wake_highest()) {
             owner_ = next;
+            add_held(next);
             should_preempt |= Scheduler::instance().make_task_ready(next);
         } else {
             owner_ = nullptr;
+        }
+
+        const uint8_t np = recompute_priority(current);
+        if (np != current->priority) {
+            Scheduler::instance().set_task_priority(current, np);
+            should_preempt = true;
         }
     }
 
